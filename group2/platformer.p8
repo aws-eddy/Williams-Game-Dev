@@ -81,6 +81,7 @@ function _draw()
 
 	for i = 1, #entities do
 		currentity = entities[i]
+		currcollisionobj = currentity:collision_object()
 		-- try entity specific rendering
 		success = currentity:render(0, 0) --todo worldx/worldy
 		if success == false then
@@ -90,7 +91,7 @@ function _draw()
 			h = currentity.height
 			for x = 0, w-1 do
 				for y = 0, h-1 do
-					if currentity:check_collision(x,y) % 2 == 1 then
+					if currcollisionobj:check_collision(x,y) % 2 == 1 then
 						rectfill(cx + x - camerax, cy + y - cameray, cx + x - camerax, cy + y - cameray, 2) --todo color
 					end
 				end
@@ -196,11 +197,12 @@ function player_collision_check(checkx, checky)
 	collided = 0
 	for i = 1, #entities do
 		currentity = entities[i]
+		currcollisionobj = currentity:collision_object()
 		for px = checkx, checkx + playerwidth - 1 do
 			for py = checky, checky + playerwidth - 1 do
 				dx = flr(px - currentity.absx)
 				dy = flr(py - currentity.absy)
-				collisionresult = currentity:check_collision(dx, dy) 
+				collisionresult = currcollisionobj:check_collision(dx, dy) 
 				if collisionresult == 1 then
 					collided = 1
 				end
@@ -239,12 +241,13 @@ function floor_check()
 	onblock = 0
 	for i = 1, #entities do
 		currentity = entities[i]
+		currcollisionobj = currentity:collision_object()
 		for px = playerx, playerx + playerwidth - 1 do
 			py = playery + playerheight
 			dx = flr(px - currentity.absx)
 			dy = flr(py - currentity.absy)
 			-- odd = collides
-			if currentity:check_collision(dx, dy) % 2 == 1 then
+			if currcollisionobj:check_collision(dx, dy) % 2 == 1 then
 				onblock = 1
 				playeryvel = 0
 			end
@@ -256,12 +259,13 @@ end
 function ceiling_check()
 	for i = 1, #entities do
 		currentity = entities[i]
+		currcollisionobj = currentity:collision_object()
 		for px = playerx, playerx + playerwidth - 1 do
 			py = playery - 1
 			dx = flr(px - currentity.absx)
 			dy = flr(py - currentity.absy)
 			-- odd = collides
-			if currentity:check_collision(dx, dy) % 2 == 1 then
+			if currcollisionobj:check_collision(dx, dy) % 2 == 1 then
 				if playeryvel < 0 then
 					playeryvel *= 0.95
 				end
@@ -302,6 +306,12 @@ function ceil(num)
   return flr(num+0x0.ffff)
 end
 
+
+function entity_collision(entity1, entity2)
+	
+end
+
+
 Entity = {absx = 0, absy = 0, width = 0, height = 0}
 function Entity:new (o) -- constructor
 	o = o or {}   -- create object if user does not provide one
@@ -314,8 +324,8 @@ collision_none = 0
 collision_blocked = 1
 collision_effect_none = 2
 collision_effect_blocked = 3
-function Entity:check_collision(relx, rely)
-	return 0
+function Entity:collision_object()
+	return CollisionObject:new()
 end
 function Entity:render(worldx, worldy)
 	return false
@@ -324,19 +334,39 @@ function Entity:event_collision(obj)
 
 end
 
+
+CollisionObject = {}
+function CollisionObject:new (o) -- constructor
+	o = o or {}   -- create object if user does not provide one
+	setmetatable(o, self)
+	self.__index = self
+	return o
+end
+
 blocktype_empty = 0
 blocktype_block = 1
 
 Terrain = Entity:new()
-function Terrain:check_collision(relx, rely)
-	if self.blocks == nil then
+function Terrain:collision_object()
+	return TerrainCollisionObject:new{blockholder = self}
+end
+function Terrain:block_data()
+	return self.blocks
+end
+
+--subclass of collisionobject used for terrain
+--pass in a blockholder in the constructor
+--blockholder must have blocks() method
+TerrainCollisionObject = CollisionObject:new()
+function TerrainCollisionObject:check_collision(relx, rely)
+	if self.blockholder == nill or self.blockholder:block_data() == nil then
 		return 0
 	else
-		if self.blocks[rely+1] == nil then
+		if self.blockholder:block_data()[rely+1] == nil then
 			return 0
 		end
 		-- note lua arrays start at 1
-		if self.blocks[rely+1][relx+1] == nil or self.blocks[rely+1][relx+1] == blocktype_empty then
+		if self.blockholder:block_data()[rely+1][relx+1] == nil or self.blockholder:block_data()[rely+1][relx+1] == blocktype_empty then
 			return 0
 		else
 			return 1
