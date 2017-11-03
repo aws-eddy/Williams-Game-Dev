@@ -2,7 +2,12 @@ pico-8 cartridge // http://www.pico-8.com
 version 8
 __lua__
 
+debug = false
+
 function init()
+	if debug then
+		unit_test()
+	end
 	world_setup()
 	player_setup()
 end
@@ -14,6 +19,7 @@ function world_setup()
 	add(entities, sampleterrain)
 	add(entities, sampleterrain2)
 	add(entities, sampleterrain3)
+	add(entities, playerentity)
 end
 
 grapplemode_none = 0
@@ -59,9 +65,6 @@ temp = 0
 function _draw()
 -- clear the screen
 	rectfill(0,0, 128,128, 12)
-	
--- print the temp text
-	print(temp, 12,6,15)
 
 -- draw a sun
 	rectfill(25,25,40,40, 15)
@@ -81,18 +84,20 @@ function _draw()
 
 	for i = 1, #entities do
 		currentity = entities[i]
-		currcollisionobj = currentity:collision_object()
+		currcollider = currentity:collider()
 		-- try entity specific rendering
 		success = currentity:render(0, 0) --todo worldx/worldy
 		if success == false then
-			cx = currentity.absx
-			cy = currentity.absy
-			w = currentity.width
-			h = currentity.height
-			for x = 0, w-1 do
-				for y = 0, h-1 do
-					if currcollisionobj:check_collision(x,y) % 2 == 1 then
-						rectfill(cx + x - camerax, cy + y - cameray, cx + x - camerax, cy + y - cameray, 2) --todo color
+			if currentity ~= playerentity then
+				cx = currentity.absx
+				cy = currentity.absy
+				w = currentity.width
+				h = currentity.height
+				for x = 0, w-1 do
+					for y = 0, h-1 do
+						if currcollider:check(x,y) then
+							rectfill(cx + x - camerax, cy + y - cameray, cx + x - camerax, cy + y - cameray, 2) --todo color
+						end
 					end
 				end
 			end
@@ -107,6 +112,16 @@ function _draw()
 	rectfill(mousex, mousey, mousex, mousey,6)
 	if grappling == 1 then
 		line(playercenterx-camerax,playercentery-cameray,grapplex-camerax,grappley-cameray,6)
+	end
+
+
+-- print the debug text
+	if debug then
+		print(temp, 12,6,15)
+		print("px " .. playerentity:collider():get_x(),12,12,1)
+		print("py " .. playerentity:collider():get_y(),12,20,1)
+		print("pw " .. playerentity:collider():get_width(),12,28,1)
+		print("ph " .. playerentity:collider():get_height(),12,36,1)
 	end
 end
 
@@ -192,43 +207,24 @@ end
 -- return true if collided
 -- return false if not collided
 function player_collision_check(checkx, checky)
-	noncollidedentities = {}
-	collidedentitites = {}
-	collided = 0
+	-- assume player is a rectangle box
+	pw = playerentity:collider():get_width()
+	ph = playerentity:collider():get_height()
+	playercollider = BoxCollider:new{absx = checkx, absy = checky, width = pw, height = ph}
 	for i = 1, #entities do
 		currentity = entities[i]
-		currcollisionobj = currentity:collision_object()
-		for px = checkx, checkx + playerwidth - 1 do
-			for py = checky, checky + playerwidth - 1 do
-				dx = flr(px - currentity.absx)
-				dy = flr(py - currentity.absy)
-				collisionresult = currcollisionobj:check_collision(dx, dy) 
-				if collisionresult == 1 then
-					collided = 1
-				end
-				if collisionresult == 2 then
-					add(noncollidedentities, currentity)
-				end
-				if collisionresult == 3 then
-					collided = 1
-					add(collidedentitites, currentity)
-				end
+		if currentity ~= playerentity then
+			currcollider = currentity:collider()
+			if collide_optimized(playercollider, currcollider) then
+				return true
 			end
 		end
 	end
-	-- result collided entities
-	for i = 1, #collidedentitites do
-		collidedentitites[i]:event_collision()
-	end
-	if collided == 1 then
-		-- skip noncollided entities
-		return true
-	end
-	-- resolve noncollided entitites
-	for i = 1, #noncollidedentities do
-		noncollidedentities[i]:event_collision()
-	end
 	return false
+end
+
+function collide_anything(collider)
+	-- body
 end
 
 -- make player stop and able to jump upon floor collision
@@ -241,15 +237,17 @@ function floor_check()
 	onblock = 0
 	for i = 1, #entities do
 		currentity = entities[i]
-		currcollisionobj = currentity:collision_object()
-		for px = playerx, playerx + playerwidth - 1 do
-			py = playery + playerheight
-			dx = flr(px - currentity.absx)
-			dy = flr(py - currentity.absy)
-			-- odd = collides
-			if currcollisionobj:check_collision(dx, dy) % 2 == 1 then
-				onblock = 1
-				playeryvel = 0
+		if currentity ~= playerentity then
+			currcollider = currentity:collider()
+			for px = playerx, playerx + playerwidth - 1 do
+				py = playery + playerheight
+				dx = flr(px - currentity.absx)
+				dy = flr(py - currentity.absy)
+				-- odd = collides
+				if currcollider:check(dx, dy) then
+					onblock = 1
+					playeryvel = 0
+				end
 			end
 		end
 	end
@@ -259,15 +257,17 @@ end
 function ceiling_check()
 	for i = 1, #entities do
 		currentity = entities[i]
-		currcollisionobj = currentity:collision_object()
-		for px = playerx, playerx + playerwidth - 1 do
-			py = playery - 1
-			dx = flr(px - currentity.absx)
-			dy = flr(py - currentity.absy)
-			-- odd = collides
-			if currcollisionobj:check_collision(dx, dy) % 2 == 1 then
-				if playeryvel < 0 then
-					playeryvel *= 0.95
+		if currentity ~= playerentity then
+			currcollider = currentity:collider()
+			for px = playerx, playerx + playerwidth - 1 do
+				py = playery - 1
+				dx = flr(px - currentity.absx)
+				dy = flr(py - currentity.absy)
+				-- odd = collides
+				if currcollider:check(dx, dy) then
+					if playeryvel < 0 then
+						playeryvel *= 0.95
+					end
 				end
 			end
 		end
@@ -312,7 +312,7 @@ function entity_collision(entity1, entity2)
 end
 
 
-Entity = {absx = 0, absy = 0, width = 0, height = 0}
+Entity = {}
 function Entity:new (o) -- constructor
 	o = o or {}   -- create object if user does not provide one
 	setmetatable(o, self)
@@ -320,12 +320,8 @@ function Entity:new (o) -- constructor
 	return o
 end
 
-collision_none = 0
-collision_blocked = 1
-collision_effect_none = 2
-collision_effect_blocked = 3
-function Entity:collision_object()
-	return CollisionObject:new()
+function Entity:collider()
+	return Collider:new{absx = 0, absy = 0, width = 0, height = 0}
 end
 function Entity:render(worldx, worldy)
 	return false
@@ -335,44 +331,453 @@ function Entity:event_collision(obj)
 end
 
 
-CollisionObject = {}
-function CollisionObject:new (o) -- constructor
+--[[
+
+Collider types:
+
+Collider (base class)
+PointCollider (point (x,y)) --- O(0)?
+BoxCollider (rectangular box with (x,y,width,height)) --- O(1)
+CircleCollider (circle with (x,y,radius)) --- O(1)
+LineCollider (line from (x1,y1) to (x2,y2))
+TerrainCollider (arbitrary collision) --- O(N)
+TriangleCollider?
+FilterCollider (check each point to a filtered condition) --- depends on filter
+MultiCollider (combine multiple Colliders) --- sum of O
+
+--]]
+
+collidertype_none = 1
+collidertype_point = 2
+collidertype_box = 3
+collidertype_circle = 4
+collidertype_line = 5
+collidertype_terrain = 6
+collidertypecount = 6
+
+Collider = {absx = 0, absy = 0, width = 0, height = 0}
+function Collider:new (o) -- constructor
 	o = o or {}   -- create object if user does not provide one
 	setmetatable(o, self)
 	self.__index = self
 	return o
 end
+-- check collision at a single point (naive checking)
+-- relative to the current object's x and y
+-- must be integer (integer == finest resolution for collision)
+function Collider:check(relx, rely)
+	assert(relx == flr(relx))
+	assert(rely == flr(rely))
+	return false
+end
+function Collider:checkabs(absx, absy)
+	return self:check(flr(absx) - flr(self:get_x()), flr(absy) - flr(self:get_y()))
+end
+function Collider:get_x()
+	return self.absx
+end
+function Collider:get_y()
+	return self.absy
+end
+function Collider:get_width()
+	return self.width
+end
+function Collider:get_height()
+	return self.height
+end
+-- number of blocks need to check using naive method
+function Collider:max_check_blocks()
+	return self:get_width() * self:get_height()
+end
+-- 2D array containing naive set of blocks to check
+function Collider:max_block_set()
+	naiveblocks = {}
+	for y = 1, self:get_height() do
+		naiveblocks[y] = {}
+		for x = 1, self:get_width() do
+			naiveblocks[y][x] = self:check(x,y)
+		end
+	end
+	return naiveblocks
+end
+-- bounding box of blocks to check
+function Collider:bounding_box()
+	return BoxCollider:new{absx = self:get_x(), absy = self:get_y(), width = self:get_width(), height = self:get_height()}
+end
+function Collider:collider_type()
+	return collidertype_none
+end
+-- for debugging purposes
+function Collider:debug_info()
+	return 'ct: ' .. self:collider_type() .. 
+		'; x: ' .. self:get_x() ..
+		'; y: ' .. self:get_y() ..
+		'; w: ' .. self:get_width() ..
+		'; h: ' .. self:get_height()
+end
+
+BoxCollider = Collider:new{absx = 0, absy = 0, width = 0, height = 0}
+function BoxCollider:check(relx, rely)
+	assert(relx == flr(relx))
+	assert(rely == flr(rely))
+	if relx >= 0 and relx < self:get_width() and rely >= 0 and rely < self:get_height() then
+		return true
+	else
+		return false
+	end
+end
+function BoxCollider:max_block_set()
+	naiveblocks = {}
+	for y = 1, self:get_height() do
+		naiveblocks[y] = {}
+		for x = 1, self:get_width() do
+			naiveblocks[y][x] = true
+		end
+	end
+	return naiveblocks
+end
+function BoxCollider:bounding_box()
+	return self
+end
+function BoxCollider:collider_type()
+	return collidertype_box
+end
+function BoxCollider:left_x()
+	return self:get_x()
+end
+function BoxCollider:top_y()
+	return self:get_y()
+end
+function BoxCollider:right_x()
+	return self:get_x() + self:get_width()
+end
+function BoxCollider:bottom_y()
+	return self:get_y() + self:get_height()
+end
+
+LineCollider = Collider:new{x1 = 0, y1 = 0, x2 = 0, y2 = 0}
+function LineCollider:check(relx, rely)
+	--TODO fuzzy line check
+	assert(relx == flr(relx))
+	assert(rely == flr(rely))
+	assert(false)
+end
+function LineCollider:collider_type()
+	return collidertype_line
+end
+function LineCollider:get_x1()
+	return self.x1
+end
+function LineCollider:get_y1()
+	return self.y1
+end
+function LineCollider:get_x2()
+	return self.x2
+end
+function LineCollider:get_y2()
+	return self.y1
+end
+--Override x/y/w/h methods
+function LineCollider:get_x()
+	return min(self:get_x1(), self:get_x2())
+end
+function LineCollider:get_y()
+	return min(self:get_y1(), self:get_y2())
+end
+function LineCollider:get_width()
+	return max(self:get_x1(), self:get_x2()) - self:get_x()
+end
+function LineCollider:get_height()
+	return max(self:get_y1(), self:get_y2()) - self:get_y()
+end
+
 
 blocktype_empty = 0
 blocktype_block = 1
 
 Terrain = Entity:new()
-function Terrain:collision_object()
-	return TerrainCollisionObject:new{blockholder = self}
+function Terrain:collider()
+	return TerrainCollider:new{blockholder = self, absx = self.absx, absy = self.absy, width = self.width, height = self.height}
 end
 function Terrain:block_data()
 	return self.blocks
 end
 
---subclass of collisionobject used for terrain
+--subclass of collider used for terrain
 --pass in a blockholder in the constructor
 --blockholder must have blocks() method
-TerrainCollisionObject = CollisionObject:new()
-function TerrainCollisionObject:check_collision(relx, rely)
+TerrainCollider = Collider:new()
+function TerrainCollider:check(relx, rely)
+	assert(relx == flr(relx))
+	assert(rely == flr(rely))
 	if self.blockholder == nill or self.blockholder:block_data() == nil then
-		return 0
+		return false
 	else
 		if self.blockholder:block_data()[rely+1] == nil then
-			return 0
+			return false
 		end
 		-- note lua arrays start at 1
 		if self.blockholder:block_data()[rely+1][relx+1] == nil or self.blockholder:block_data()[rely+1][relx+1] == blocktype_empty then
-			return 0
+			return false
 		else
-			return 1
+			return true
 		end
 	end
 end
+function TerrainCollider:collider_type()
+	return collidertype_terrain
+end
+
+--[[
+check for optimized collision between two colliders
+fallback to naive collision detection if no optimized version exists
+when more collider types are added, modify this to add their optimizations
+--]]
+function collide_optimized(collider1, collider2)
+	c1type = collider1:collider_type()
+	c2type = collider2:collider_type()
+	--one if first, two if second, three if both
+	colliderlisting = {}
+	for x = 1, collidertypecount do
+		colliderlisting[x] = 0
+	end
+	--type ranges from 1 to collidertypecount
+	colliderlisting[c1type] = colliderlisting[c1type] + 1
+	colliderlisting[c2type] = colliderlisting[c2type] + 2
+	--only one type of ordering
+	clpoint = colliderlisting[collidertype_point]
+	clbox = colliderlisting[collidertype_box]
+	clcircle = colliderlisting[collidertype_circle]
+	clline = colliderlisting[collidertype_line]
+
+	--optimize for point/anything
+	if clpoint == 1 or clpoint == 3 then
+		--collider 1 is a point, check that point in collider 2
+		return collider2.checkabs(collider1:get_x(), collider1:get_y())
+	elseif clpoint == 2 then
+		--collider 2 is a point, check that point in collider 1
+		return collider1.checkabs(collider2:get_x(), collider2:get_y())
+	end
+
+	--optimize for box/box, box/circle, box/line
+	if clbox > 0 then
+		if clbox == 3 then 
+			--both colliders are boxes
+			return collide_box_on_box(collider1, collider2)
+		else
+			boxc = nil
+			nonboxc = nil
+			if clbox == 2 then
+				boxc = collider2
+				nonboxc = collider1
+			else 
+				--clbox == 1
+				boxc = collider1
+				nonboxc = collider2
+			end
+			if clcircle > 0 then
+				return collide_box_on_circle(boxc, nonboxc)
+			elseif clline > 0 then
+				return collide_box_on_line(boxc, nonboxc)
+			end
+			-- otherwise fallback to next
+		end
+	end
+
+	--optimize for circle/circle, circle/line
+	if clcircle > 0 then
+		if clcircle == 3 then
+			return collide_circle_on_circle(collider1, collider2)
+		else
+			circlec = nil
+			noncirclec = nil
+			if clcircle == 2 then
+				circlec = collider2
+				noncirclec = collider1
+			else
+				--clcircle == 1
+				circlec = collider1
+				noncirclec = collider2
+			end
+			if clline > 0 then
+				return collide_circle_on_line(circlec, noncirclec)
+			end
+		end
+	end
+
+	--optimize for line/line
+	if clline > 0 then
+		if clline == 3 then
+			return collide_line_on_line(collider1, collider2)
+		end
+	end
+
+	--optimize by bounding box
+	bb1 = collider1:bounding_box()
+	bb2 = collider2:bounding_box()
+	if not collide_box_on_box(bb1, bb2) then
+		return false
+	end
+
+	--naive fallback
+	return collide_naive(collider1, collider2)
+end
+
+--[[
+check collision naively
+first, from the collider with less max blocks, get the naive block set
+(the maximum possible set of blocks)
+then, for each block in that set, first check if it intersects the original, 
+then check if it intersects the new set
+if both are true, a collision has been reached
+otherwise, keep looking for collisions
+--]]
+function collide_naive(collider1, collider2)
+	--figure out the collider with less max blocks
+	lesscollider = nil
+	morecollider = nil
+	mcb1 = collider1:max_check_blocks()
+	mcb2 = collider2:max_check_blocks()
+	if mcb1 <= mcb2 then
+		lesscollider = collider1
+		morecollider = collider2
+	else
+		lesscollider = collider2
+		morecollider = collider1
+	end
+	objx = flr(lesscollider:get_x())
+	objy = flr(lesscollider:get_y())
+	mx = flr(morecollider:get_x())
+	my = flr(morecollider:get_y())
+	objwidth = flr(lesscollider:get_width())
+	objheight = flr(lesscollider:get_height())
+	--TODO naive block optimizations
+	--naiveblocks = lesscollider:max_block_set()
+	--loop through the naive block set
+	for px = objx, objx + objwidth - 1 do
+		for py = objy, objy + objheight - 1 do
+			ldx = px - objx + 1
+			ldy = py - objy + 1
+			objcollisionresult = true
+			if naiveblocks ~= nil then
+				objcollisionresult = naiveblocks[ldy][ldx]
+			end
+			if objcollisionresult then
+				lessresult = lesscollider:checkabs(px, py)
+				moreresult =  morecollider:checkabs(px, py) 
+				if lessresult and moreresult then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+--collider helper functions
+function collide_box_on_box(box1, box2)
+	-- check if box is out of another box
+	if flr(box1:right_x()) <= flr(box2:left_x()) or
+		flr(box2:right_x()) <= flr(box1:left_x()) or
+		flr(box1:bottom_y()) <= flr(box2:top_y()) or
+		flr(box2:bottom_y()) <= flr(box1:top_y()) then
+		return false
+	else
+		return true
+	end
+end
+
+function collide_box_on_circle(box1, circle1)
+	-- check if circle is in box (circle center in box)
+	-- check if box is in circle (any corner)
+	-- check if any edge interesects circle
+	if box1:checkabs(circle1:center_x(), circle1:center_y()) then
+		--circle 1 in box 1
+		return true
+	elseif circle1:checkabs(box1:left_x(), box1:top_y()) or
+		circle1:checkabs(box1:right_x(), box1:top_y()) and
+		circle1:checkabs(box1:left_x(), box1:bottom_y()) and
+		circle1:checkabs(box1:right_x(), box1:bottom_y()) then
+		--box 1 in circle 1
+		return true
+	else
+		boxlines = box_edges(box1)
+		for i = 1, #boxlines do
+			if collide_circle_on_line(circle1, boxlines[i]) then
+				--box line intersects with circle
+				return true
+			end
+		end
+		return false
+	end
+end
+
+function collide_box_on_line(box1, line1)
+	-- check if line is in box (either endpoint)
+	-- check line-line for the four lines of the box
+	if box1:checkabs(line1:get_x1(), line1:get_y1()) or 
+		box1:checkabs(line1:get_x2(), line1:get_y2()) then
+		return true
+	else
+		boxlines = box_edges(box1)
+		for i = 1, #boxlines do
+			if collide_line_on_line(line1, boxlines[i]) then
+				--box line intersects with line
+				return true
+			end
+		end
+		return false
+	end
+end
+
+function collide_circle_on_circle(circle1, circle2)
+	-- check if circle are less than (r1 + r2) away
+	if distance(circle1:center_x(), circle1:center_y(), circle2:center_x(), circle2:center_y()) <= 
+		circle1:radius() + circle2:radius() then
+		return true
+	else
+		return false
+	end
+end
+
+function collide_circle_on_line(circle1, line1)
+	-- check if line is in circle (either endpoint)
+	-- use distance formula
+	printh("Error: collide_cicle_on_line not implemented!")
+	assert(false)
+	return false
+end
+
+function collide_line_on_line(line1, line2)
+	-- todo matrix implementation
+	printh("Error: collide_line_on_line not implemented!")
+	assert(false)
+	return false
+end
+
+--returns an array of four lines containing the edges of the box
+function box_edges(box1)
+	leftx = box1:left_x()
+	rightx = box1:right_x()
+	topy = box1:top_y()
+	bottomy = box1:bottom_y()
+	arr = {}
+	-- top-left to top-right
+	arr[1] = LineCollider:new{x1 = leftx, y1 = topy, x2 = rightx, y2 = topy}
+	-- top-right to bottom-right
+	arr[2] = LineCollider:new{x1 = rightx, y1 = topy, x2 = rightx, y2 = bottomy}
+	-- bottom-right to bottom-left
+	arr[3] = LineCollider:new{x1 = rightx, y1 = bottomy, x2 = leftx, y2 = bottomy}
+	-- bottom-left to top-left
+	arr[4] = LineCollider:new{x1 = leftx, y1 = bottomy, x2 = leftx, y2 = topy}
+	return arr
+end
+
+--euclidean distance formula
+function distance(x1, y1, x2, y2)
+	return sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1))
+end
+
  
 sb1w = 25
 sb1h = 25
@@ -389,7 +794,7 @@ for y = 1, sb1h do
 		end
 	end
 end
-sampleterrain = Terrain:new{absx = 75, absy = 75, width = sb1w, height = sb1h, blocks = sampleblocks} 
+sampleterrain = Terrain:new{absx = 67, absy = 75, width = sb1w, height = sb1h, blocks = sampleblocks} 
 
 sb2w = 65
 sb2h = 1
@@ -419,6 +824,57 @@ for y = 1, sb3h do
 end
 sampleterrain3 = Terrain:new{absx = 0, absy = 50, width = sb3w, height = sb3h, blocks = sampleblocks3} 
 
+PlayerEntity = Entity:new{}
+function PlayerEntity:collider()
+	return BoxCollider:new{absx = get_player_x(), absy = get_player_y(), width = self.width, height = self.height}
+end
+
+playerentity = PlayerEntity:new{width = 8, height = 8}
+
+function get_player_x()
+	return playerx
+end
+
+function get_player_y()
+	return playery
+end
+
+function unit_test()
+	printh('--------------------------------')
+	printh('Begin Unit Tests')
+	printh('--------------------------------')
+	collision_test()
+	printh('--------------------------------')
+	printh('End Unit Tests')
+	printh('--------------------------------')
+end
+
+function collision_test()
+	printh('--------------------------------')
+	printh('Begin Collision Tests')
+	printh('--------------------------------')
+	colliderp1 = BoxCollider:new{absx = 1, absy = 1, width = 1, height = 1}
+	printh('point test')
+	assert(collide_optimized(colliderp1, colliderp1))
+
+	collider1 = sampleterrain3:collider()
+	collider2 = BoxCollider:new{absx = 5, absy = 45, width = 8, height = 8}
+
+	printh('c1bb: ' .. collider1:bounding_box():debug_info())
+	printh('c2bb: ' .. collider2:bounding_box():debug_info())
+
+	printh('bounding box test')
+	assert(collide_box_on_box(collider1:bounding_box(), collider2:bounding_box()))
+
+	printh('collision test')
+	assert(collide_optimized(collider1, collider2))
+
+	collider3 = BoxCollider:new{absx = 60, absy = 67.1, width = 8, height = 8}
+	collider4 = sampleterrain2:collider()
+
+	printh('edge collision test')
+	assert(collide_optimized(collider3, collider4))
+end
 
 init()
  
